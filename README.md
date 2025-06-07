@@ -78,7 +78,7 @@ These images are referenced in `docker-compose.override.yml` and used in DAG exe
    * MinIO (on [http://localhost:9000](http://localhost:9000))
    * Spark master & worker
    * PostgreSQL
-   * Metabase (optional)
+   * Metabase (on http://localhost:3000/)
 
 3. **Add Airflow connections** (via UI or `airflow_settings.yaml`):
 
