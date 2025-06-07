@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Airflow local
+airflow.db
+logs/
+tmp/
+
+# MinIO data folder (you probably don't want to push your raw data)
+include/data/
+
+# Docker, OS
+.env
+*.log
+.DS_Store
+
+# Jupyter, VSCode
+.ipynb_checkpoints/
+.vscode/
