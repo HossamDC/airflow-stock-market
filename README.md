@@ -1,48 +1,165 @@
-Overview
-========
+# Airflow Stock Market ETL Pipeline
 
-Welcome to Astronomer! This project was generated after you ran 'astro dev init' using the Astronomer CLI. This readme describes the contents of the project, as well as how to run Apache Airflow on your local machine.
+A complete end‑to‑end data pipeline using Apache Airflow, Spark, MinIO (S3‑compatible object store), and PostgreSQL, all orchestrated locally with the Astronomer CLI (*Astro*).
 
-Project Contents
-================
+---
 
-Your Astro project contains the following files and folders:
+## 📖 Overview
 
-- dags: This folder contains the Python files for your Airflow DAGs. By default, this directory includes one example DAG:
-    - `example_astronauts`: This DAG shows a simple ETL pipeline example that queries the list of astronauts currently in space from the Open Notify API and prints a statement for each astronaut. The DAG uses the TaskFlow API to define tasks in Python, and dynamic task mapping to dynamically print a statement for each astronaut. For more on how this DAG works, see our [Getting started tutorial](https://www.astronomer.io/docs/learn/get-started-with-airflow).
-- Dockerfile: This file contains a versioned Astro Runtime Docker image that provides a differentiated Airflow experience. If you want to execute other commands or overrides at runtime, specify them here.
-- include: This folder contains any additional files that you want to include as part of your project. It is empty by default.
-- packages.txt: Install OS-level packages needed for your project by adding them to this file. It is empty by default.
-- requirements.txt: Install Python packages needed for your project by adding them to this file. It is empty by default.
-- plugins: Add custom or community plugins for your project to this file. It is empty by default.
-- airflow_settings.yaml: Use this local-only file to specify Airflow Connections, Variables, and Pools instead of entering them in the Airflow UI as you develop DAGs in this project.
+This project periodically fetches historical stock price data from the Yahoo Finance API, stores raw JSON in MinIO, formats it with Spark into CSV, and then merges only the new records into PostgreSQL. A Metabase dashboard can then visualize the loaded data.
 
-Deploy Your Project Locally
-===========================
+<div align="center">
+![Architecture Diagram](docs/architecture.png)
+<em>Figure 1: High‑level pipeline architecture</em>
+</div>
 
-Start Airflow on your local machine by running 'astro dev start'.
+---
 
-This command will spin up five Docker containers on your machine, each for a different Airflow component:
+## 🧰 Prerequisites
 
-- Postgres: Airflow's Metadata Database
-- Scheduler: The Airflow component responsible for monitoring and triggering tasks
-- DAG Processor: The Airflow component responsible for parsing DAGs
-- API Server: The Airflow component responsible for serving the Airflow UI and API
-- Triggerer: The Airflow component responsible for triggering deferred tasks
+1. **Docker & Docker Compose** installed and running.
+2. **Git** (for cloning this repo).
+3. **Astronomer CLI (Astro)** to spin up Airflow locally:
 
-When all five containers are ready the command will open the browser to the Airflow UI at http://localhost:8080/. You should also be able to access your Postgres Database at 'localhost:5432/postgres' with username 'postgres' and password 'postgres'.
+   ```bash
+   # macOS via Homebrew:
+   brew install astronomer/tap/astro-cli
 
-Note: If you already have either of the above ports allocated, you can either [stop your existing Docker containers or change the port](https://www.astronomer.io/docs/astro/cli/troubleshoot-locally#ports-are-not-available-for-my-local-airflow-webserver).
+   # Linux / Windows (via pip):
+   pip install astro-cli
 
-Deploy Your Project to Astronomer
-=================================
+   # Verify installation:
+   astro version
+   ```
+4. **MinIO Client (mc)** *optional* for inspecting bucket contents.
 
-If you have an Astronomer account, pushing code to a Deployment on Astronomer is simple. For deploying instructions, refer to Astronomer documentation: https://www.astronomer.io/docs/astro/deploy-code/
+---
 
-Contact
-=======
+## 🛠️ Build Spark Images (before starting Astro)
 
-The Astronomer CLI is maintained with love by the Astronomer team. To report a bug or suggest a change, reach out to our support.
+Before using Astro, build these three Docker images manually:
 
-![image](https://github.com/user-attachments/assets/070af541-d1ac-4552-8bba-48a471cc9091)
+```bash
+# Spark Master
+cd spark/master
+docker build -t airflow/spark-master .
+
+# Spark Worker
+cd ../worker
+docker build -t airflow/spark-worker .
+
+# Spark Application Image (used by DockerOperator)
+cd ../notebooks/stock_transform
+docker build -t airflow/stock-app .
+```
+
+These images are referenced in `docker-compose.override.yml` and used in DAG execution.
+
+---
+
+## 🚀 Setup & Local Development
+
+1. **Clone the repository**:
+
+   ```bash
+   git clone https://github.com/<your-org>/airflow-stock-market.git
+   cd airflow-stock-market
+   ```
+
+2. **Start everything with Astro**:
+
+   ```bash
+   astro dev start --wait
+   ```
+
+   This will bring up:
+
+   * Airflow webserver & scheduler (on [http://localhost:8080](http://localhost:8080))
+   * MinIO (on [http://localhost:9000](http://localhost:9000))
+   * Spark master & worker
+   * PostgreSQL
+   * Metabase (optional)
+
+3. **Add Airflow connections** (via UI or `airflow_settings.yaml`):
+
+   * **stock\_api**: *generic* pointing at Yahoo Finance endpoint + headers.
+   * **minio**: *generic* (host: `minio:9000`, login: `minio`, password: `minio123`).
+   * **postgres**: credentials are `postgres:postgres@postgres:5432/postgres`.
+
+4. **Run a test DAG**:
+
+   ```bash
+   astro dev run dags test stock_market 2025-06-01
+   ```
+
+---
+
+## 📂 Repo Structure
+
+```
+├── dags/                  # Airflow DAG definitions
+│   └── stock_market.py
+├── include/               # Custom task modules & helpers
+│   └── stock_market/tasks.py
+├── spark/                 # Spark application + Dockerfiles
+├── airflow_settings.yaml  # Connections & variables
+├── docker-compose.override.yml
+├── requirements.txt
+├── packages.txt           # System‑level packages
+├── pg_hba.conf
+├── tests/                 # Unit tests for DAGs
+└── docs/                  # Screenshots and architecture diagrams
+    ├── architecture.png             # <-- attach architecture diagram
+    ├── minio_storage.png           # <-- attach screenshot of MinIO UI
+    ├── airflow_dag.png             # <-- attach screenshot of DAG in Airflow
+    └── metabase_dashboard.png      # <-- attach Metabase dashboard image
+```
+
+---
+
+## 🔧 How It Works
+
+1. **`is_api_available`** sensor: polls the Finance API until it’s ready.
+2. **`get_stock_prices`**: fetches raw JSON and XComs the payload.
+3. **`store_prices`**: pushes JSON to `s3://stock-market/<SYMBOL>/prices.json` in MinIO.
+4. **`format_prices`** (DockerOperator + Spark): reads JSON from MinIO, explodes and zips arrays, writes CSV back under `formatted_prices/`.
+5. **`get_formatted_csv`**: lists new CSV files and returns the path.
+6. **`merge_to_postgres`**: downloads all CSVs into a staging table, then upserts only new records into the final `stock_market` table.
+
+---
+
+## 📑 Screenshots
+
+<div align="center">
+
+|              Architecture              |              Airflow DAG             |           MinIO Bucket           |            Metabase Dashboard            |
+| :------------------------------------: | :----------------------------------: | :------------------------------: | :--------------------------------------: |
+| ![architecture](docs/architecture.png) | ![Airflow DAG](docs/airflow_dag.png) | ![MinIO](docs/minio_storage.png) | ![Metabase](docs/metabase_dashboard.png) |
+
+</div>
+
+---
+
+## 🛠️ Deployment
+
+To push this project live (on Astronomer Cloud or your own Kubernetes cluster):
+
+1. **Build & publish** the Spark Docker image:
+
+   ```bash
+   cd spark/notebooks/stock_transform
+   docker build -t <your-registry>/stock-app:latest .
+   docker push <your-registry>/stock-app:latest
+   ```
+
+2. **Update** the DAG’s `DockerOperator` image reference to your published tag.
+
+3. **Deploy** the Airflow chart or Astronomer project as usual.
+
+---
+
+*Last updated: 2025‑06‑07*
+
+
+
 
