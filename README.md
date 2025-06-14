@@ -109,10 +109,10 @@ These images are referenced in `docker-compose.override.yml` and used in DAG exe
 ├── pg_hba.conf
 ├── tests/                 # Unit tests for DAGs
 └── docs/                  # Screenshots and architecture diagrams
-    ├── architecture.png             # <-- attach architecture diagram
-    ├── minio_storage.png           # <-- attach screenshot of MinIO UI
-    ├── airflow_dag.png             # <-- attach screenshot of DAG in Airflow
-    └── metabase_dashboard.png      # <-- attach Metabase dashboard image
+    ├── architecture.png             # <--  architecture diagram
+    ├── minio_storage.png           # <--  screenshot of MinIO UI
+    ├── airflow_dag.png             # <--  screenshot of DAG in Airflow
+    └── metabase_dashboard.png      # <--  Metabase dashboard image
 ```
 
 ---
